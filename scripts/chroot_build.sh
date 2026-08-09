@@ -107,7 +107,7 @@ function install_pkg() {
         os-prober \
         network-manager \
         net-tools \
-        wireless-tools \
+        iw \
         wpagui \
         locales \
         grub-common \

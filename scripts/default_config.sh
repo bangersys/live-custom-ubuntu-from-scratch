@@ -37,6 +37,22 @@ export TARGET_PACKAGE_REMOVE="
     os-prober \
 "
 
+# Installs each package one at a time and only warns (doesn't abort the
+# build) if a given package no longer exists in this release's archive --
+# e.g. wireless-tools was dropped from Ubuntu around 24.10/25.04 and broke
+# the stock build script. Deliberately NOT used for boot-critical packages
+# (grub, shim, casper, etc.) -- those should still fail loudly, since a
+# silently-skipped boot package gives you an ISO that won't boot at all,
+# which is worse than a failed build.
+function apt_try_install() {
+    local pkg
+    for pkg in "$@"; do
+        if ! apt-get install -y "$pkg"; then
+            echo ">>> WARNING: package '$pkg' is not available for $TARGET_UBUNTU_VERSION -- skipping it, build continues" >&2
+        fi
+    done
+}
+
 # Package customisation function.  Update this function to customize packages
 # present on the installed system.
 function customize_image() {
@@ -56,7 +72,7 @@ function customize_image() {
     # ------------------------------------------------------------------
     # 1. Desktop environment
     # ------------------------------------------------------------------
-    apt-get install -y \
+    apt_try_install \
         plymouth-themes \
         ubuntu-gnome-desktop \
         ubuntu-gnome-wallpapers
@@ -65,7 +81,7 @@ function customize_image() {
     # 2. C / C++ build toolchain (all from Ubuntu's own repo = latest
     #    for this release, no third-party PPA needed)
     # ------------------------------------------------------------------
-    apt-get install -y \
+    apt_try_install \
         build-essential \
         gcc \
         g++ \
@@ -84,6 +100,15 @@ function customize_image() {
         pkg-config \
         make \
         patchelf \
+        libelf-dev \
+        libdw-dev \
+        graphviz \
+        systemtap \
+        subversion \
+        libboost-filesystem-dev \
+        libtbb-dev \
+        libspdlog-dev \
+        libjemalloc-dev \
         git \
         git-lfs \
         python3 \
@@ -126,7 +151,24 @@ function customize_image() {
         docker-compose-plugin
 
     # ------------------------------------------------------------------
-    # 5. Node.js latest LTS + npm, from NodeSource's official apt repo
+    # 5. Rootless container stack -- podman + buildah from Ubuntu's own
+    #    archive (26.04 ships podman 5.7 / buildah 1.42, close to
+    #    Fedora's podman 5.8). Supports the same custom containers/storage
+    #    layout (/mnt/gvm/podman) used on the Fedora host. All rootless
+    #    prerequisites are included.
+    # ------------------------------------------------------------------
+    apt_try_install \
+        podman \
+        buildah \
+        containers-storage \
+        crun \
+        fuse-overlayfs \
+        slirp4netns \
+        uidmap \
+        passt
+
+    # ------------------------------------------------------------------
+    # 6. Node.js latest LTS + npm, from NodeSource's official apt repo
     #    (Ubuntu's bundled nodejs is old; NodeSource keeps this current
     #    and it's still installed via apt)
     # ------------------------------------------------------------------
@@ -134,7 +176,7 @@ function customize_image() {
     apt-get install -y nodejs
 
     # ------------------------------------------------------------------
-    # 6. uv, bun, opencode -- none of these are packaged in apt at all
+    # 7. uv, bun, opencode -- none of these are packaged in apt at all
     #    (they're too new / not distro-packaged), so this is the one
     #    place we use each tool's official installer script instead.
     #    All three are pointed at system-wide locations so they work for
@@ -150,27 +192,59 @@ function customize_image() {
     OPENCODE_INSTALL_DIR=/usr/local/bin bash -c "$(curl -fsSL https://opencode.ai/install)"
 
     # ------------------------------------------------------------------
-    # 7. Media: ffmpeg, mpv, vlc (all in Ubuntu universe/multiverse,
+    # 8. Media: ffmpeg, mpv, vlc, yt-dlp (all in Ubuntu universe/multiverse,
     #    already enabled in sources.list by this project)
     # ------------------------------------------------------------------
-    apt-get install -y \
+    apt_try_install \
         ffmpeg \
         mpv \
         vlc \
-        vlc-plugin-base
+        vlc-plugin-base \
+        yt-dlp
 
     # ------------------------------------------------------------------
-    # 8. Common build dependencies shared by Chromium / WebKitGTK /
-    #    Firefox source builds. This is a solid baseline, NOT a complete
-    #    substitute for each project's own bootstrap script -- once you
-    #    clone the actual source trees, still run:
-    #      Chromium:  ./build/install-build-deps.sh
-    #      WebKitGTK: ./Tools/gtk/install-dependencies
-    #      Firefox:   ./mach bootstrap
-    #    those scripts self-update against the exact current requirement
-    #    list for whatever revision you've checked out.
+    # 9. GStreamer plugin set (1.28 in 26.04). Mirrors the RPM Fusion
+    #    gstreamer1-plugins-* set -- bad/ugly pull in codecs, libav adds
+    #    FFmpeg demuxers, vaapi enables Intel hardware decode.
     # ------------------------------------------------------------------
-    apt-get install -y \
+    apt_try_install \
+        gstreamer1.0-tools \
+        gstreamer1.0-plugins-base \
+        gstreamer1.0-plugins-good \
+        gstreamer1.0-plugins-bad \
+        gstreamer1.0-plugins-ugly \
+        gstreamer1.0-plugins-extra \
+        gstreamer1.0-libav \
+        gstreamer1.0-vaapi
+
+    # ------------------------------------------------------------------
+    # 10. GPU diagnostics + Intel VA-API. HD 2500 (Ivy Bridge) is Gen7, so
+    #     use the i965 driver, NOT intel-media-va-driver (Gen8+ only).
+    #     Vulkan on HD 2500 is effectively unsupported -- keep mesa-utils
+    #     (glxinfo) + vainfo as the meaningful checks.
+    # ------------------------------------------------------------------
+    apt_try_install \
+        mesa-utils \
+        vulkan-tools \
+        clinfo \
+        vainfo \
+        vdpauinfo \
+        ocl-icd-libopencl1 \
+        i965-va-driver \
+        i965-va-driver-shaders
+
+    # ------------------------------------------------------------------
+    # 11. Common build dependencies shared by Chromium / WebKitGTK /
+    #     Firefox source builds. This is a solid baseline, NOT a complete
+    #     substitute for each project's own bootstrap script -- once you
+    #     clone the actual source trees, still run:
+    #       Chromium:  ./build/install-build-deps.sh
+    #       WebKitGTK: ./Tools/gtk/install-dependencies
+    #       Firefox:   ./mach bootstrap
+    #     those scripts self-update against the exact current requirement
+    #     list for whatever revision you've checked out.
+    # ------------------------------------------------------------------
+    apt_try_install \
         bison flex gperf nasm yasm \
         libglib2.0-dev libgtk-3-dev libgtk-4-dev \
         libnss3-dev libnspr4-dev \
@@ -186,10 +260,13 @@ function customize_image() {
         ruby perl
 
     # ------------------------------------------------------------------
-    # 9. General system + productivity CLI tools
-    #    (WizTree analog: ncdu + baobab. Everything-search analog: fd + rg)
+    # 12. General system + productivity CLI tools
+    #     (WizTree analog: ncdu + baobab. Everything-search analog: fd + rg)
+    #     gh = GitHub CLI (archive version, not newest upstream). socat =
+    #     needed by VS Code tunnels. gnome-shell-extension-manager =
+    #     replaces the Extension Manager Flatpak.
     # ------------------------------------------------------------------
-    apt-get install -y \
+    apt_try_install \
         terminator \
         tmux \
         zsh \
@@ -217,10 +294,13 @@ function customize_image() {
         nano \
         less \
         gnome-tweaks \
-        clamav-daemon
+        clamav-daemon \
+        gh \
+        socat \
+        gnome-shell-extension-manager
 
     # ------------------------------------------------------------------
-    # 10. Passwordless sudo for whatever user ubiquity creates at install
+    # 13. Passwordless sudo for whatever user ubiquity creates at install
     #     time (ubiquity puts that user in the 'sudo' group by default,
     #     so granting NOPASSWD to the group covers them automatically).
     #     Comment this whole block out if you'd rather keep sudo asking
