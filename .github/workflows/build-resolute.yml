@@ -1,0 +1,44 @@
+name: build-resolute
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set target to Ubuntu 26.04 (resolute)
+        run: |
+          cd scripts
+          sed -i -E 's/TARGET_UBUNTU_VERSION=(.*)/TARGET_UBUNTU_VERSION="resolute"/g' default_config.sh
+
+      - name: Prep host + debootstrap compatibility symlink
+        run: |
+          cd scripts
+          ./build.sh setup_host
+          # If the debootstrap package on this runner doesn't ship a
+          # "resolute" script yet (26.04 is very new), fall back to the
+          # generic bootstrap script -- this is a long-standing, safe
+          # trick for bootstrapping releases newer than the host's
+          # debootstrap knows about by name.
+          sudo ln -sf /usr/share/debootstrap/scripts/gutsy /usr/share/debootstrap/scripts/resolute
+
+      - name: Build (debootstrap -> chroot -> ISO)
+        run: |
+          cd scripts
+          ./build.sh debootstrap -
+
+      - name: Archive artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-from-scratch-26.04
+          path: |
+            scripts/ubuntu-from-scratch.iso
+            scripts/image/md5sum.txt
