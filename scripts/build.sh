@@ -52,11 +52,15 @@ function chroot_enter_setup() {
 }
 
 function chroot_exit_teardown() {
-    sudo chroot chroot umount -l /proc
-    sudo chroot chroot umount -l /sys
-    sudo chroot chroot umount -l /dev/pts
-    sudo umount -l chroot/dev
-    sudo umount -l chroot/run
+    # Best-effort cleanup only. The chroot build has already finished by the
+    # time this runs, so a mount that is already gone (e.g. sysfs cleaned up
+    # by the kernel on some runners) must not abort the build and skip
+    # build_iso. Each umount is therefore non-fatal.
+    sudo chroot chroot umount -l /proc    || true
+    sudo chroot chroot umount -l /sys     || true
+    sudo chroot chroot umount -l /dev/pts || true
+    sudo umount -l chroot/dev             || true
+    sudo umount -l chroot/run             || true
 }
 
 function check_host() {

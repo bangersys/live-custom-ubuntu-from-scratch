@@ -281,7 +281,7 @@ function customize_image() {
         btop \
         ncdu \
         baobab \
-        neofetch \
+        fastfetch \
         rsync \
         unzip \
         zip \
